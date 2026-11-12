@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="nl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aanwezigheid &amp; beoordeling</title>
+<style>
+:root{--bg:#f6f7f9;--c:#fff;--t:#1d2433;--m:#667085;--a:#2f5fd0;--ok:#1f9d55;--b:#dde1e8}
+@media(prefers-color-scheme:dark){:root{--bg:#14171c;--c:#1e232b;--t:#e8ebf0;--m:#9aa3b2;--a:#6c93f0;--ok:#3ec17a;--b:#333a45}}
+*{box-sizing:border-box}body{margin:0;font:16px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+main{max-width:860px;margin:0 auto;padding:12px}
+h1{font-size:20px;margin:8px 0}
+.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:12px;margin:10px 0}
+nav{display:flex;gap:6px}nav button{flex:1}
+button,select,input,textarea{font:inherit;color:var(--t);background:var(--c);border:1px solid var(--b);border-radius:8px;padding:8px 10px}
+button{cursor:pointer}button.on{background:var(--a);color:#fff;border-color:var(--a)}
+button.p.on{background:var(--ok);border-color:var(--ok)}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--b)}
+.row:first-child{border-top:0}.nm{flex:1;min-width:130px;font-weight:600}
+.r button{padding:8px 12px}.r{display:flex;gap:4px}
+.ctl{display:flex;gap:8px;flex-wrap:wrap}.ctl>*{flex:1;min-width:140px}
+.m{color:var(--m);font-size:14px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid var(--b);text-align:left}
+.sc{overflow-x:auto}textarea{width:100%;min-height:110px}label{display:block;margin:8px 0 4px;font-weight:600}
+.r{flex-wrap:wrap;align-items:center}
+.cg{font-weight:600}
+.cg.groen{border-color:#1f9d55;color:#1f9d55}.cg.groen.on{background:#1f9d55;color:#fff}
+.cg.blauw{border-color:#2f6fe0;color:#4d85f0}.cg.blauw.on{background:#2f6fe0;color:#fff}
+.cg.rood{border-color:#d93025;color:#e5483e}.cg.rood.on{background:#d93025;color:#fff}
+.cg.zwart{border-color:var(--t)}.cg.zwart.on{background:#000;color:#fff;border-color:var(--t)}
+.vk{display:flex;align-items:center;gap:6px;margin:0 0 0 6px;font-weight:400;white-space:nowrap}.vk input{width:22px;height:22px;padding:0}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head><body><main>
+<h1>Aanwezigheid &amp; beoordeling</h1>
+<div class="card m" id="st"></div>
+<nav id="nav"></nav>
+<div id="v"></div>
+</main>
+<script>
+const KEY='aanwezigheid-v2',$=s=>document.querySelector(s);
+const DAGEN=['Maandag','Dinsdag','Woensdag','Donderdag','Vrijdag','Zaterdag','Zondag'];
+const ord=(a,b)=>DAGEN.indexOf(a)-DAGEN.indexOf(b);
+const dagVan=v=>DAGEN[(new Date(v+'T12:00').getDay()+6)%7];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+let D={dagen:{},lessen:{}},fh=null,msg='',ui={tab:'reg',datum:today(),dag:'',g:0,od:'',op:'',ok:'',rk:'',per:'',imp:''};
+const CAN=!!window.showOpenFilePicker;
+try{const s=localStorage.getItem(KEY);if(s)D=JSON.parse(s)}catch(e){}
+const fmt=d=>new Date(d+'T12:00').toLocaleDateString('nl-NL',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+function weekDatums(y,weken,dagen){const j4=new Date(Date.UTC(y,0,4)),m=j4.getTime()-((j4.getUTCDay()+6)%7)*864e5,r=[];
+ weken.forEach(w=>dagen.forEach(d=>{const i=DAGEN.indexOf(d);if(i>=0)r.push(new Date(m+((w-1)*7+i)*864e5).toISOString().slice(0,10))}));return r}
+function parseDatums(t){const z=new Set(),pad=x=>x.padStart(2,'0');(Array.isArray(t)?t.join('\n'):t).split(/[\n,;]+/).forEach(x=>{x=x.trim();let m,d='';
+ if(m=x.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))d=`${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+ else if(m=x.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/))d=`${m[3]}-${pad(m[2])}-${pad(m[1])}`;
+ const t2=new Date(d+'T00:00:00Z');if(d&&!isNaN(t2)&&t2.toISOString().slice(0,10)==d)z.add(d)});return[...z].sort()}
+if(!D.periodes||!D.periodes.length)D.periodes=[{id:'p1',naam:'Sportoriëntatie 2027',datums:weekDatums(2027,[1,2,3],['Maandag','Dinsdag','Donderdag'])}];
+
+/* ---------- opslag ---------- */
+function merge(base,over){if(!base||!base.dagen)return over;
+ if((base.gen||0)!=(over.gen||0))return JSON.parse(JSON.stringify((base.gen||0)>(over.gen||0)?base:over));
+ const o=JSON.parse(JSON.stringify(over));o.bron=o.bron||base.bron;
+ o.periodes=o.periodes||[];(base.periodes||[]).forEach(p=>{if(!o.periodes.some(x=>x.id==p.id))o.periodes.push(p)});
+ for(const d in base.dagen)if(!o.dagen[d])o.dagen[d]=base.dagen[d];
+ for(const k in base.lessen){const b=base.lessen[k],l=o.lessen[k];if(!l)o.lessen[k]=b;else l.s={...b.s,...l.s}}return o}
+let tm;function save(){try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){}clearTimeout(tm);tm=setTimeout(push,400)}
+async function push(){if(!fh)return;try{const t=await(await fh.getFile()).text();if(t.trim())D=merge(JSON.parse(t),D);const w=await fh.createWritable();await w.write(JSON.stringify(D,null,1));await w.close();msg='Opgeslagen in gedeeld bestand ✓'}catch(e){msg='Opslaan mislukt: '+e.message}bar()}
+async function pull(){if(!fh)return;try{const t=await(await fh.getFile()).text();if(t.trim()){D=merge(D,JSON.parse(t));localStorage.setItem(KEY,JSON.stringify(D))}msg='Bijgewerkt vanuit gedeeld bestand ✓';render()}catch(e){msg='Laden mislukt: '+e.message;bar()}}
+const idb=()=>new Promise(r=>{const q=indexedDB.open('aw',1);q.onupgradeneeded=()=>q.result.createObjectStore('h');q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)});
+async function hSet(h){try{(await idb()).transaction('h','readwrite').objectStore('h').put(h,'fh')}catch(e){}}
+async function hGet(){try{const d=await idb();return await new Promise(r=>{const q=d.transaction('h').objectStore('h').get('fh');q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)})}catch(e){return null}}
+async function koppel(nieuw){try{
+ const o={types:[{description:'JSON',accept:{'application/json':['.json']}}]};
+ if(nieuw)fh=await showSaveFilePicker({...o,suggestedName:'aanwezigheid-data.json'});else[fh]=await showOpenFilePicker(o);
+ await fh.requestPermission({mode:'readwrite'});hSet(fh);
+ const t=await(await fh.getFile()).text();if(t.trim())D=merge(D,JSON.parse(t));await push();render()}catch(e){if(e.name!=='AbortError'){msg='Koppelen mislukt: '+e.message;bar()}}}
+async function herstel(){try{await fh.requestPermission({mode:'readwrite'});await pull()}catch(e){msg=e.message;bar()}}
+function csvDownload(aoa){const csv=aoa.map(x=>x.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(';')).join('\n');
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));a.download='aanwezigheid-export.csv';a.click()}
+function exportXlsx(){const R=rijen().sort((a,b)=>a.datum.localeCompare(b.datum)||ord(a.dag,b.dag)||a.groep.localeCompare(b.groep)||a.klas.localeCompare(b.klas)||a.naam.localeCompare(b.naam));
+ const kop=['Datum','Dag','Groep','Klas','Leerling','Aanwezig','Beoordeling','Spullen vergeten'];
+ const rows=[kop,...R.map(r=>[r.datum,r.dag,r.groep,r.klas,r.naam,r.p?'ja':'nee',r.r?cap(r.r):'',r.v?'ja':'nee'])];
+ if(!window.XLSX){csvDownload(rows);alert('De Excel-lezer kon niet laden (internet nodig); het bestand is als CSV gedownload.');return}
+ const P=D.periodes.find(x=>x.id==ui.op),wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet(rows);
+ ws['!cols']=[12,11,14,8,28,10,12,16].map(w=>({wch:w}));
+ ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:Math.max(rows.length-1,1),c:kop.length-1}})};
+ XLSX.utils.book_append_sheet(wb,ws,'Registraties');
+ const N=Object.values(D.lessen).filter(l=>l.notitie&&(!P||P.datums.includes(l.datum))&&(!ui.od||l.dag==ui.od)).sort((a,b)=>a.datum.localeCompare(b.datum)).map(l=>[l.datum,l.dag,l.groep,l.notitie]);
+ if(N.length){const w2=XLSX.utils.aoa_to_sheet([['Datum','Dag','Groep','Notitie'],...N]);w2['!cols']=[12,11,14,70].map(w=>({wch:w}));XLSX.utils.book_append_sheet(wb,w2,'Lesnotities')}
+ XLSX.writeFile(wb,'aanwezigheid-export.xlsx')}
+
+/* ---------- import uit Excel / CSV ---------- */
+function csv(t){const sep=[';','\t',','].find(s=>t.split('\n')[0].includes(s))||';',rows=[];let r=[],c='',q=false;
+ for(let i=0;i<t.length;i++){const ch=t[i];
+  if(q){if(ch=='"'){if(t[i+1]=='"'){c+='"';i++}else q=false}else c+=ch}
+  else if(ch=='"')q=true;else if(ch==sep){r.push(c);c=''}
+  else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);rows.push(r);r=[];c=''}else c+=ch}
+ if(c||r.length){r.push(c);rows.push(r)}return rows}
+function groepen(rows){const w=Math.max(0,...rows.map(r=>r.length)),g=[],c0=rows[0]||[];let pc=-9;
+ for(let c=0;c<w;c++){const h=c0[c]==null?'':String(c0[c]).trim();
+  if(c==pc+1&&(h===''||/^klas(sen)?$/i.test(h))){g[g.length-1].kc=c;continue}
+  if(h){g.push({naam:h,nc:c,kc:-1});pc=c}}
+ return g.map(x=>{const ll=[],cnt={},out={naam:x.naam,leerlingen:[],klas:{}};
+  for(let r=1;r<rows.length;r++){const v=rows[r][x.nc];if(v==null||!String(v).trim())continue;
+   const k=x.kc>=0&&rows[r][x.kc]!=null?String(rows[r][x.kc]).trim():'',n=String(v).trim();cnt[n]=(cnt[n]||0)+1;ll.push([n,k])}
+  ll.forEach(([n,k],i)=>{const nm=cnt[n]>1?`${n} (${k||i+1})`:n;out.leerlingen.push(nm);if(k)out.klas[nm]=k});return out})}
+async function importeer(inp){const f=inp.files[0];if(!f)return;const sel=$('#impdag').value,wis=$('#impwis').checked,bl=[];
+ try{if(/\.csv$/i.test(f.name))bl.push([f.name,csv((await f.text()).replace(/^\ufeff/,''))]);
+  else{if(!window.XLSX)throw new Error('De Excel-lezer kon niet laden (internet nodig). Sla het blad op als CSV en kies hieronder de dag.');
+   const wb=XLSX.read(await f.arrayBuffer());wb.SheetNames.filter(n=>n.toLowerCase()!='uitleg').forEach(n=>bl.push([n,XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,blankrows:false})]))}
+  const ok=[],skip=[],nw={};
+  bl.forEach(([n,rows])=>{const k=n.trim().toLowerCase(),gr=groepen(rows),
+   dag=DAGEN.find(d=>d.toLowerCase()==k||d.slice(0,2).toLowerCase()==k)||(bl.length==1?sel:'');
+   if(!dag||!gr.length){skip.push(n);return}
+   nw[dag]={klassen:wis?'':(D.dagen[dag]||{}).klassen||'',groepen:gr};
+   ok.push(`${dag}: ${gr.length} groepen, ${gr.reduce((s,x)=>s+x.leerlingen.length,0)} leerlingen`)});
+  ui.imp=(ok.length?'Geïmporteerd – '+ok.join('; '):'Niets geïmporteerd.')+(skip.length?` Overgeslagen (geen dagnaam of lege kolommen): ${skip.join(', ')}.`:'');
+  if(ok.length){if(wis){D.dagen={};D.lessen={};D.gen=Date.now();ui.imp+=' Eerdere registraties en de oude indeling zijn gewist.'}
+   Object.assign(D.dagen,nw);D.bron={naam:f.name,op:new Date().toISOString()};ui.dag='';ui.od='';ui.g=0;save()}}
+ catch(e){ui.imp='Importeren mislukt: '+e.message}
+ render()}
+
+/* ---------- registreren ---------- */
+const KL=['groen','blauw','rood','zwart'],cap=x=>x[0].toUpperCase()+x.slice(1);
+const gr=()=>D.dagen[ui.dag].groepen[ui.g];
+const per=()=>D.periodes.find(p=>p.id==ui.per)||D.periodes[0];
+const kv=(g,n)=>(g.klas&&g.klas[n])||'';
+function L(create){const g=gr(),k=`${ui.datum}|${ui.dag}|${g.naam}`;if(!D.lessen[k]&&create)D.lessen[k]={datum:ui.datum,dag:ui.dag,groep:g.naam,notitie:'',s:{}};return D.lessen[k]}
+function E(i){const g=gr(),n=g.leerlingen[i],l=L(1);return l.s[n]||(l.s[n]={p:0,r:'',v:0,k:kv(g,n)})}
+function setP(i){const e=E(i);e.p=e.p?0:1;if(!e.p){e.r='';e.v=0}save();render()}
+function setR(i,v){const e=E(i);e.p=1;e.r=e.r===v?'':v;save();render()}
+function setV(i){const e=E(i);e.p=1;e.v=e.v?0:1;save();render()}
+function allP(){const g=gr();g.leerlingen.forEach((n,i)=>{if(!ui.rk||kv(g,n)==ui.rk)E(i).p=1});save();render()}
+function note(v){L(1).notitie=v;save()}
+const dagen=()=>Object.keys(D.dagen).sort(ord);
+const leeg=`<div class="card m">Nog geen indeling. Importeer eerst je Excel-bestand bij “Instellingen”.</div>`;
+const sel=(oc,o)=>`<select onchange="${oc}">${o}</select>`;
+const kopt=(ks,v,alle)=>`<option value="">${alle}</option>`+ks.map(k=>`<option${k==v?' selected':''}>${esc(k)}</option>`).join('');
+function reg(){const dg=dagen();if(!dg.length)return leeg;
+ const P=per();ui.per=P.id;let h=`<div class="card"><div class="ctl">`;
+ if(D.periodes.length>1)h+=sel("ui.per=this.value;ui.dag='';ui.datum='';ui.g=0;render()",D.periodes.map(p=>`<option value="${p.id}"${p.id==P.id?' selected':''}>${esc(p.naam)}</option>`).join(''));
+ const dd=dg.filter(d=>P.datums.some(x=>dagVan(x)==d));
+ if(!dd.length)return h+`</div><p class="m">Voor deze periode zijn nog geen lesdatums ingevuld die bij de dagen in de indeling passen. Vul ze in bij “Instellingen”.</p></div>`;
+ if(!dd.includes(ui.dag))ui.dag=P.datums.includes(ui.datum)&&dd.includes(dagVan(ui.datum))?dagVan(ui.datum):dd[0];
+ const ds=P.datums.filter(x=>dagVan(x)==ui.dag);
+ if(!ds.includes(ui.datum))ui.datum=ds.find(x=>x>=today())||ds[ds.length-1];
+ const day=D.dagen[ui.dag];ui.g=Math.min(ui.g,day.groepen.length-1);
+ const g0=day.groepen[ui.g],ks=g0?[...new Set(g0.leerlingen.map(n=>kv(g0,n)).filter(Boolean))].sort():[];
+ if(!ks.includes(ui.rk))ui.rk='';
+ h+=sel("ui.dag=this.value;ui.g=0;ui.datum='';render()",dd.map(d=>`<option${d==ui.dag?' selected':''}>${d}</option>`).join(''))
+  +sel("ui.datum=this.value;render()",ds.map(x=>`<option value="${x}"${x==ui.datum?' selected':''}>${fmt(x)}</option>`).join(''))
+  +sel("ui.g=+this.value;render()",day.groepen.map((g,i)=>`<option value="${i}"${i==ui.g?' selected':''}>${esc(g.naam)}</option>`).join(''))
+  +(ks.length>1?sel("ui.rk=this.value;render()",kopt(ks,ui.rk,'Alle klassen')):'')
+  +`</div>${day.klassen?`<p class="m" style="margin:8px 0 0">Klassen: ${esc(day.klassen)}</p>`:''}</div>`;
+ if(!g0)return h;
+ const ll=g0.leerlingen,l=L(),vis=ll.filter(x=>!ui.rk||kv(g0,x)==ui.rk),n=vis.filter(x=>l&&l.s[x]&&l.s[x].p).length;
+ h+=`<div class="card"><div class="row" style="border:0"><span class="m" style="flex:1">${n} van ${vis.length} aanwezig</span><button onclick="allP()">Iedereen aanwezig</button></div>`;
+ ll.forEach((x,i)=>{if(ui.rk&&kv(g0,x)!=ui.rk)return;const e=(l&&l.s[x])||{p:0,r:'',v:0};
+  h+=`<div class="row"><span class="nm">${esc(x)}${kv(g0,x)?` <span class="m">${esc(kv(g0,x))}</span>`:''}</span><button class="p${e.p?' on':''}" onclick="setP(${i})">${e.p?'Aanwezig':'Afwezig'}</button>
+  <span class="r">${KL.map(k=>`<button class="cg ${k}${e.r===k?' on':''}" onclick="setR(${i},'${k}')">${cap(k)}</button>`).join('')}
+  <label class="vk"><input type="checkbox"${e.v?' checked':''} onchange="setV(${i})">Spullen vergeten</label></span></div>`});
+ return h+`</div><div class="card"><label>Notitie bij deze les</label><textarea style="min-height:70px" onchange="note(this.value)">${esc(l?l.notitie:'')}</textarea></div>`}
+
+/* ---------- overzicht ---------- */
+function klassen(){const z=new Set();Object.values(D.dagen).forEach(d=>d.groepen.forEach(g=>Object.values(g.klas||{}).forEach(k=>z.add(k))));return[...z].sort()}
+function rijen(){const P=D.periodes.find(p=>p.id==ui.op),out=[];
+ Object.values(D.lessen).forEach(l=>{const g=((D.dagen[l.dag]||{}).groepen||[]).find(x=>x.naam==l.groep);
+  [...new Set([...(g?g.leerlingen:[]),...Object.keys(l.s)])].forEach(n=>{const e=l.s[n]||{};
+   out.push({datum:l.datum,dag:l.dag,groep:l.groep,klas:e.k||(g?kv(g,n):''),naam:n,p:e.p?1:0,r:KL.includes(e.r)?e.r:'',v:e.v?1:0})})});
+ return out.filter(x=>(!P||P.datums.includes(x.datum))&&(!ui.od||x.dag==ui.od)&&(!ui.ok||x.klas==ui.ok))}
+function agg(){const A={},mk=r=>{const k=r.dag+'|'+r.groep+'|'+r.naam;return A[k]||(A[k]={dag:r.dag,groep:r.groep,klas:r.klas,naam:r.naam,t:0,p:0,v:0,c:{groen:0,blauw:0,rood:0,zwart:0}})};
+ dagen().filter(d=>!ui.od||d==ui.od).forEach(d=>D.dagen[d].groepen.forEach(g=>g.leerlingen.forEach(n=>{if(!ui.ok||kv(g,n)==ui.ok)mk({dag:d,groep:g.naam,naam:n,klas:kv(g,n)})})));
+ rijen().forEach(r=>{const a=mk(r);a.t++;a.p+=r.p;a.v+=r.v;if(r.r)a.c[r.r]++});
+ return Object.values(A).sort((a,b)=>ord(a.dag,b.dag)||a.groep.localeCompare(b.groep)||a.klas.localeCompare(b.klas)||a.naam.localeCompare(b.naam))}
+function ovz(){const dg=dagen();if(!dg.length)return leeg;const rows=agg(),ks=klassen();
+ return `<div class="card"><div class="ctl">${sel("ui.op=this.value;render()",`<option value="">Alle periodes</option>`+D.periodes.map(p=>`<option value="${p.id}"${p.id==ui.op?' selected':''}>${esc(p.naam)}</option>`).join(''))}
+ ${sel("ui.od=this.value;render()",kopt(dg,ui.od,'Alle dagen'))}
+ ${ks.length?sel("ui.ok=this.value;render()",kopt(ks,ui.ok,'Alle klassen')):''}
+ <button onclick="exportXlsx()">Exporteer naar Excel</button></div>
+ <p class="m">Aanwezig = aantal keer aanwezig / aantal geregistreerde lessen; leerlingen die je bij een les niet aantikt, tellen als afwezig. De export volgt de gekozen periode, dag en klas en bevat een filter per kolom.</p>
+ <div class="sc"><table><tr><th>Dag</th><th>Groep</th><th>Klas</th><th>Leerling</th><th>Aanwezig</th>${KL.map(k=>`<th>${cap(k)}</th>`).join('')}<th>Spullen vergeten</th></tr>
+ ${rows.map(a=>`<tr><td>${a.dag}</td><td>${esc(a.groep)}</td><td>${esc(a.klas)}</td><td>${esc(a.naam)}</td><td>${a.t?a.p+'/'+a.t:'–'}</td>${KL.map(k=>`<td>${a.c[k]||'–'}</td>`).join('')}<td>${a.v||'–'}</td></tr>`).join('')}</table></div></div>`}
+
+/* ---------- instellingen ---------- */
+function setKl(d,v){D.dagen[d].klassen=v;save()}
+function setLl(d,gi,v){const g=D.dagen[d].groepen[gi];g.leerlingen=[];g.klas={};
+ v.split('\n').forEach(x=>{x=x.trim();if(!x)return;const i=x.lastIndexOf('|'),n=(i<0?x:x.slice(0,i)).trim(),k=i<0?'':x.slice(i+1).trim();if(!n)return;g.leerlingen.push(n);if(k)g.klas[n]=k});save();render()}
+const pid=id=>D.periodes.find(p=>p.id==id);
+function setPN(id,v){pid(id).naam=v.trim()||'Periode';save();render()}
+function setPD(id,v){pid(id).datums=parseDatums(v);save();render()}
+function addP(){D.periodes.push({id:'p'+Date.now(),naam:'Nieuwe periode',datums:[]});save();render()}
+function genP(id){const y=+$('#jr'+id).value,w=$('#wk'+id).value.split(/[^0-9]+/).filter(Boolean).map(Number).filter(n=>n>=1&&n<=53);
+ if(!y||!w.length)return;const dg=dagen(),p=pid(id);p.datums=parseDatums(p.datums.concat(weekDatums(y,w,dg.length?dg:DAGEN.slice(0,5))));save();render()}
+function wisX(wat,d){const z=" Dit geldt ook voor collega's die hetzelfde databestand gebruiken.";
+ const t={reg:'Alle registraties (aanwezigheid en beoordelingen) wissen?'+z,alles:'De indeling én alle registraties wissen?'+z,dag:d+' verwijderen, inclusief de registraties van die dag?'+z}[wat];
+ if(!confirm(t))return;
+ if(wat=='dag'){delete D.dagen[d];for(const k in D.lessen)if(D.lessen[k].dag==d)delete D.lessen[k]}
+ else{D.lessen={};if(wat=='alles'){D.dagen={};D.bron=null}}
+ D.gen=Date.now();ui.dag='';ui.od='';ui.g=0;ui.imp='';save();render()}
+function inst(){let h=`<div class="card"><b>Periodes en lesdatums</b>
+ <p class="m">Bij Registreren zijn alleen de datums hieronder te kiezen. Typ ze (één per regel, bijv. 2027-01-11 of 11-01-2027), of vul ze automatisch aan met kalenderweken (de lesdagen komen uit de ingelezen indeling).</p>`;
+ D.periodes.forEach(p=>{h+=`<div style="border-top:1px solid var(--b);padding-top:8px;margin-top:8px"><label>Naam van de periode</label><input value="${esc(p.naam)}" onchange="setPN('${p.id}',this.value)">
+  <label>Lesdatums (${p.datums.length})</label><textarea onchange="setPD('${p.id}',this.value)">${p.datums.join('\n')}</textarea>
+  <div class="ctl" style="margin-top:8px"><input id="jr${p.id}" type="number" value="${p.datums[0]?p.datums[0].slice(0,4):2027}" aria-label="Jaar"><input id="wk${p.id}" placeholder="Weeknummers, bijv. 2,3,4"><button onclick="genP('${p.id}')">Datums toevoegen</button></div></div>`});
+ h+=`<button onclick="addP()" style="margin-top:10px">+ Nieuwe periode</button></div>
+ <div class="card"><b>Indeling importeren uit Excel</b>
+ <p class="m">Eén blad per lesdag, met als bladnaam de dag (bijv. Maandag). Rij 1: de namen van de groepen (bijv. Kickboksen, Yoga, Spel). Daaronder per kolom de leerlingen, en direct rechts van elke leerlingenkolom een kolom met de klas (kop: Klas). Opnieuw importeren vervangt de indeling van die dag; opgeslagen lessen blijven bewaard.</p>
+ <label>Dag (alleen nodig bij een CSV of één blad zonder dagnaam)</label><select id="impdag"><option value="">–</option>${DAGEN.map(d=>`<option>${d}</option>`).join('')}</select>
+ <label class="vk" style="margin:12px 0 0;white-space:normal"><input type="checkbox" id="impwis" checked>Nieuwe periode: wis alle eerdere registraties en de oude indeling</label>
+ <label>Bestand (.xlsx of .csv)</label><input type="file" accept=".xlsx,.xls,.csv" onchange="importeer(this)">
+ ${D.bron?`<p class="m">Huidige indeling komt uit: <b>${esc(D.bron.naam)}</b>, geïmporteerd op ${new Date(D.bron.op).toLocaleString('nl-NL',{dateStyle:'medium',timeStyle:'short'})}</p>`:''}
+ ${ui.imp?`<p><b>${esc(ui.imp)}</b></p>`:''}</div>`;
+ dagen().forEach(d=>{const day=D.dagen[d];
+  h+=`<div class="card"><div class="row" style="border:0;padding:0"><b style="flex:1">${d} <span class="m">· ${day.groepen.length} groepen, ${day.groepen.reduce((n,g)=>n+g.leerlingen.length,0)} leerlingen</span></b><button onclick="wisX('dag','${d}')">Verwijder dag</button></div><label>Klassen (alleen ter info)</label><input value="${esc(day.klassen||'')}" placeholder="bijv. 4F en 4G" onchange="setKl('${d}',this.value)">
+  ${day.groepen.map((g,i)=>`<label>${esc(g.naam)} – leerlingen (één per regel, bijv. Jan Jansen | 4F)</label><textarea onchange="setLl('${d}',${i},this.value)">${esc(g.leerlingen.map(n=>kv(g,n)?n+' | '+kv(g,n):n).join('\n'))}</textarea>`).join('')}</div>`});
+ h+=`<div class="card"><b>Gegevens wissen</b><p class="m">Alleen de registraties wissen, of ook de ingelezen indeling. De periodes en lesdatums blijven staan.</p><div class="ctl"><button onclick="wisX('reg')">Alle registraties wissen</button><button onclick="wisX('alles')">Indeling en registraties wissen</button></div></div>`;
+ return h}
+
+/* ---------- opbouw ---------- */
+function bar(){let h='';
+ if(!CAN)h='Opslag in deze browser. Open het bestand in Edge of Chrome om data met collega\'s te delen via OneDrive.';
+ else if(fh)h=`${esc(msg||'Gekoppeld aan gedeeld bestand')} <button onclick="herstel()">Vernieuwen</button>`;
+ else h=`Nog geen gedeeld databestand gekoppeld (nu: alleen deze browser). <button onclick="koppel(true)">Nieuw bestand maken</button> <button onclick="koppel(false)">Bestaand bestand kiezen</button>`;
+ $('#st').innerHTML=h}
+function render(){bar();$('#nav').innerHTML=[['reg','Registreren'],['ovz','Overzicht'],['inst','Instellingen']].map(([k,t])=>`<button class="${ui.tab===k?'on':''}" onclick="ui.tab='${k}';render()">${t}</button>`).join('');
+ $('#v').innerHTML={reg,ovz,inst}[ui.tab]()}
+(async()=>{render();if(CAN){fh=await hGet();if(fh){try{if(await fh.queryPermission({mode:'readwrite'})==='granted')await pull();else{msg='Klik op Vernieuwen om weer toegang te geven tot het gedeelde bestand';bar()}}catch(e){fh=null;bar()}}else bar()}})();
+window.addEventListener('focus',()=>{if(fh)fh.queryPermission({mode:'readwrite'}).then(p=>p==='granted'&&pull())});
+</script></body></html>
